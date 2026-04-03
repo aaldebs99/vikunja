@@ -1,17 +1,37 @@
 import {HTTPFactory} from '@/helpers/fetcher'
 import {isDesktopApp, refreshDesktopToken} from '@/helpers/desktopAuth'
 
+const REFRESH_TOKEN_KEY = 'vikunja_refresh_token'
+
 let savedToken: string | null = null
 
 /**
- * Saves a token while optionally saving it to lacal storage. This is used when viewing a link share:
- * It enables viewing multiple link shares indipendently from each in multiple tabs other without overriding any other open ones.
+ * Saves a token while optionally saving it to local storage. This is used when viewing a link share:
+ * It enables viewing multiple link shares independently from each in multiple tabs other without overriding any other open ones.
  */
 export const saveToken = (token: string, persist: boolean) => {
 	savedToken = token
 	if (persist) {
 		localStorage.setItem('token', token)
 	}
+}
+
+/**
+ * Saves the refresh token to localStorage.
+ * This serves as a fallback for environments where HttpOnly cookies are not
+ * reliably persisted (e.g. iOS PWAs that clear cookies on app restart).
+ */
+export const saveRefreshToken = (refreshToken: string) => {
+	if (refreshToken) {
+		localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+	}
+}
+
+/**
+ * Returns the refresh token from localStorage, if any.
+ */
+export const getRefreshToken = (): string | null => {
+	return localStorage.getItem(REFRESH_TOKEN_KEY)
 }
 
 /**
@@ -33,6 +53,7 @@ export const removeToken = () => {
 	savedToken = null
 	localStorage.removeItem('token')
 	localStorage.removeItem('desktopOAuthRefreshToken')
+	localStorage.removeItem(REFRESH_TOKEN_KEY)
 }
 
 /**
@@ -75,10 +96,18 @@ export async function refreshToken(persist: boolean): Promise<void> {
 		}
 
 		// We hold the lock and no one else refreshed — make the API call.
+		// The refresh token is normally sent as an HttpOnly cookie by the
+		// browser. As a fallback for environments that don't reliably
+		// persist cookies (iOS PWAs), we also send it in the request body.
 		const HTTP = HTTPFactory()
 		try {
-			const response = await HTTP.post('user/token/refresh')
+			const storedRefresh = getRefreshToken()
+			const body = storedRefresh ? {refresh_token: storedRefresh} : {}
+			const response = await HTTP.post('user/token/refresh', body)
 			saveToken(response.data.token, persist)
+			if (response.data.refresh_token) {
+				saveRefreshToken(response.data.refresh_token)
+			}
 		} catch (e) {
 			throw new Error('Error renewing token: ', {cause: e})
 		}

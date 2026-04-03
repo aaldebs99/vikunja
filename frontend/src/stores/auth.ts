@@ -7,7 +7,7 @@ import {objectToSnakeCase} from '@/helpers/case'
 import UserModel, {getDisplayName, fetchAvatarBlobUrl, invalidateAvatarCache} from '@/models/user'
 import AvatarService from '@/services/avatar'
 import UserSettingsService from '@/services/userSettings'
-import {getToken, refreshToken, removeToken, saveToken} from '@/helpers/auth'
+import {getToken, refreshToken, removeToken, saveToken, saveRefreshToken} from '@/helpers/auth'
 import {useWebSocket} from '@/composables/useWebSocket'
 import {setModuleLoading} from '@/stores/helper'
 import {success, error} from '@/message'
@@ -186,6 +186,9 @@ export const useAuthStore = defineStore('auth', () => {
 			const response = await HTTP.post('login', objectToSnakeCase(credentials))
 			// Save the token to local storage for later use
 			saveToken(response.data.token, true)
+			if (response.data.refresh_token) {
+				saveRefreshToken(response.data.refresh_token)
+			}
 
 			// Tell others the user is authenticated
 			await checkAuth()
@@ -255,6 +258,9 @@ export const useAuthStore = defineStore('auth', () => {
 			const response = await HTTP.post(`/auth/openid/${provider}/callback`, data)
 			// Save the token to local storage for later use
 			saveToken(response.data.token, true)
+			if (response.data.refresh_token) {
+				saveRefreshToken(response.data.refresh_token)
+			}
 			setLoggedInVia(provider)
 
 			// Tell others the user is authenticated

@@ -42,9 +42,13 @@ const (
 	AuthTypeLinkShare
 )
 
-// Token represents an authentication token
+// Token represents an authentication token response.
+// The refresh_token field is only populated on login and token refresh so that
+// PWA / mobile clients can persist it in localStorage as a fallback when
+// HttpOnly cookies are not reliably available (e.g. iOS PWAs).
 type Token struct {
-	Token string `json:"token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"`
+	Token        string `json:"token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"`
+	RefreshToken string `json:"refresh_token,omitempty"`
 }
 
 const RefreshTokenCookieName = "vikunja_refresh_token"      //nolint:gosec // not a credential
@@ -115,7 +119,10 @@ func NewUserAuthTokenResponse(u *user.User, c *echo.Context, long bool) error {
 	SetRefreshTokenCookie(c, session.RefreshToken, cookieMaxAge)
 
 	c.Response().Header().Set("Cache-Control", "no-store")
-	return c.JSON(http.StatusOK, Token{Token: t})
+	return c.JSON(http.StatusOK, Token{
+		Token:        t,
+		RefreshToken: session.RefreshToken,
+	})
 }
 
 // NewUserJWTAuthtoken generates and signs a new short-lived jwt token for a user.

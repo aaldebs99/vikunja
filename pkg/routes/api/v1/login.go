@@ -174,22 +174,50 @@ func RenewToken(c *echo.Context) (err error) {
 	return c.JSON(http.StatusOK, auth.Token{Token: t})
 }
 
-// RefreshToken exchanges a valid refresh token (sent as an HttpOnly cookie) for
-// a new short-lived JWT. The refresh token is rotated on every call.
+// refreshTokenRequest is the optional request body for the refresh endpoint.
+// When the HttpOnly cookie is not available (e.g. iOS PWA after app restart),
+// the client can send the refresh token in the request body instead.
+type refreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// RefreshToken exchanges a valid refresh token for a new short-lived JWT.
+// The refresh token can be provided either as an HttpOnly cookie (preferred)
+// or in the JSON request body as a fallback for environments where cookies
+// are not reliably persisted (e.g. iOS PWAs).
+// The refresh token is rotated on every call.
 // @Summary Refresh user token
-// @Description Exchanges the refresh token cookie for a new short-lived JWT.
+// @Description Exchanges the refresh token cookie (or body) for a new short-lived JWT.
 // @tags auth
+// @Accept json
 // @Produce json
+// @Param body body refreshTokenRequest false "Fallback: provide refresh_token in body when cookie is unavailable"
 // @Success 200 {object} auth.Token
 // @Failure 401 {object} models.Message "Invalid or expired refresh token."
 // @Router /user/token/refresh [post]
 func RefreshToken(c *echo.Context) (err error) {
+	// Try the HttpOnly cookie first (preferred, most secure).
+	var rawToken string
 	cookie, err := c.Cookie(auth.RefreshTokenCookieName)
-	if err != nil || cookie.Value == "" {
+	if err == nil && cookie.Value != "" {
+		rawToken = cookie.Value
+	}
+
+	// Fall back to the request body. This supports PWA clients where
+	// the browser discards HttpOnly cookies on app restart (iOS Safari).
+	if rawToken == "" {
+		var body refreshTokenRequest
+		// Bind errors are not fatal — the body is optional.
+		if bindErr := c.Bind(&body); bindErr == nil && body.RefreshToken != "" {
+			rawToken = body.RefreshToken
+		}
+	}
+
+	if rawToken == "" {
 		return echo.NewHTTPError(http.StatusUnauthorized, "No refresh token provided.")
 	}
 
-	result, err := auth.RefreshSession(cookie.Value)
+	result, err := auth.RefreshSession(rawToken)
 	if err != nil {
 		if user2.IsErrUserStatusError(err) {
 			auth.ClearRefreshTokenCookie(c)
@@ -204,7 +232,10 @@ func RefreshToken(c *echo.Context) (err error) {
 	auth.SetRefreshTokenCookie(c, result.NewRefreshToken, cookieMaxAge)
 
 	c.Response().Header().Set("Cache-Control", "no-store")
-	return c.JSON(http.StatusOK, auth.Token{Token: result.AccessToken})
+	return c.JSON(http.StatusOK, auth.Token{
+		Token:        result.AccessToken,
+		RefreshToken: result.NewRefreshToken,
+	})
 }
 
 // Logout deletes the current session from the server.
